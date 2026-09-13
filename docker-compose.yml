@@ -1,0 +1,37 @@
+# Brings up the whole stack with one command: `docker compose up`.
+#   db     - Postgres with the pgvector extension (stores chunks + embeddings)
+#   ollama - runs the LLM and embedding model locally (free, no API key)
+#   api    - the FastAPI app
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: sift
+      POSTGRES_PASSWORD: sift
+      POSTGRES_DB: sift
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+  api:
+    build: .
+    depends_on:
+      - db
+      - ollama
+    environment:
+      DATABASE_URL: postgresql+psycopg://sift:sift@db:5432/sift
+      OLLAMA_URL: http://ollama:11434
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
+  ollama:
