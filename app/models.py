@@ -28,6 +28,11 @@ class Document(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    # ingestion status: "pending" -> "processing" -> "ready" (or "failed").
+    # Set when the upload is accepted; updated by the background ingest task.
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    # where the raw uploaded file is stored, so the background worker can read it
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     # one document has many chunks; deleting the document deletes its chunks
     chunks: Mapped[list["Chunk"]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
@@ -52,6 +57,7 @@ class Chunk(Base):
 class DocumentOut(BaseModel):
     id: int
     filename: str
+    status: str
     chunk_count: int
 
 

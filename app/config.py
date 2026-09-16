@@ -29,6 +29,24 @@ class Settings(BaseSettings):
     top_k: int = 4                 # how many chunks to retrieve per question
     min_score: float = 0.35        # below this similarity, we treat retrieval as "nothing relevant"
 
+    # Retrieval mode: "vector" (semantic only) or "hybrid" (semantic + keyword, fused).
+    retrieval_mode: str = "hybrid"
+    rrf_k: int = 60                # Reciprocal Rank Fusion constant (standard default)
+
+    # --- agentic loop (LangGraph) ---
+    # If the best retrieved chunk is below this, the agent rewrites the query and
+    # retries retrieval, up to max_retrieval_attempts, before answering or refusing.
+    good_score: float = 0.55
+    max_retrieval_attempts: int = 2
+
+    # --- Celery (async ingestion) ---
+    redis_url: str = "redis://localhost:6379/0"
+    # Run tasks in-process instead of via a worker (used in tests; no broker needed).
+    celery_eager: bool = False
+    # Where uploaded files are stored so the worker can read them. In Docker this
+    # is a shared volume; in production it would be object storage (e.g. S3).
+    uploads_dir: str = "./uploads"
+
 
 @lru_cache
 def get_settings() -> Settings:

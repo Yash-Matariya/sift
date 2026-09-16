@@ -4,14 +4,21 @@ Ingestion: turn an uploaded document into stored, embedded chunks.
 The flow is: read the file's text -> split it into overlapping chunks ->
 embed each chunk into a vector -> store the chunks (with vectors) in Postgres.
 Retrieval later searches those vectors.
+
+Ingestion runs in a background Celery worker (see app/tasks.py), not in the
+upload request, so uploads return immediately. `ingest_into` is written to be
+idempotent — it clears any existing chunks first — so a retried task can't
+create duplicate chunks.
 """
 import io
 
 from pypdf import PdfReader
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Document, Chunk
+from app.storage import read_upload
 from app.llm import embed
 
 
@@ -40,15 +47,48 @@ def _chunk(text: str) -> list[str]:
     return chunks
 
 
-def ingest_document(session: Session, filename: str, data: bytes) -> Document:
-    text = _read_text(filename, data)
-    doc = Document(filename=filename)
-    session.add(doc)
-    session.flush()                       # assigns doc.id before we reference it
-    for index, piece in enumerate(_chunk(text)):
-        vector = embed(piece)             # one embedding per chunk (via Ollama)
-        session.add(Chunk(document_id=doc.id, chunk_index=index,
-                          text=piece, embedding=vector))
+def ingest_into(session: Session, document_id: int) -> None:
+    """Chunk, embed, and store the document's file. Idempotent and retry-safe.
+
+    Reads the document's saved file, clears any chunks from a previous run,
+    then stores fresh chunks and marks the document ready. On any failure the
+    status is set to "failed" and the error re-raised so the task can record it.
+    """
+    doc = session.get(Document, document_id)
+    if doc is None:
+        raise ValueError(f"document {document_id} not found")
+
+    doc.status = "processing"
     session.commit()
-    session.refresh(doc)
-    return doc
+
+    try:
+        data = read_upload(doc.source_path)
+        text = _read_text(doc.filename, data)
+
+        # Idempotency: remove any chunks from a previous (partial) run so a
+        # retry produces the same clean result instead of duplicates.
+        session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+
+        for index, piece in enumerate(_chunk(text)):
+            vector = embed(piece)             # one embedding per chunk (via Ollama)
+            session.add(Chunk(document_id=doc.id, chunk_index=index,
+                              text=piece, embedding=vector))
+
+        doc.status = "ready"
+        session.commit()                      # chunks + status committed together
+    except Exception:
+        session.rollback()
+        # mark failed in its own transaction so the status is visible
+        doc = session.get(Document, document_id)
+        if doc is not None:
+            doc.status = "failed"
+            session.commit()
+        raise
+
+
+def chunk_count(session: Session, document_id: int) -> int:
+    """How many chunks a document currently has."""
+    from sqlalchemy import func
+    return session.scalar(
+        select(func.count()).select_from(Chunk).where(Chunk.document_id == document_id)
+    ) or 0
