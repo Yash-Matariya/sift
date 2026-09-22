@@ -1,5 +1,7 @@
 # Sift — an agentic RAG document assistant
 
+> This is the **AI Document Assistant** project listed on my resume.
+
 Upload your documents, ask questions in plain language, and get answers that **cite the exact passages they came from** — and that **say "I don't know" instead of making something up** when the documents don't contain the answer.
 
 ---
