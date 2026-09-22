@@ -44,6 +44,7 @@ That is **Retrieval-Augmented Generation (RAG)** — and the exact thing this jo
 | FastAPI | the REST API (`app/main.py`) |
 | PyTest | the test suite (`tests/`) |
 | Celery | background document ingestion (`app/tasks.py`) |
+| LangChain | the answer chain — prompt template, model, output parser composed with LCEL (`app/rag.py`) |
 | LangGraph | the retrieve → grade → answer/refuse agent (`app/agent.py`) |
 | RAG, embeddings, vector search | the core of the product (pgvector) |
 | PostgreSQL | the database — documents, chunks, embeddings |
@@ -68,7 +69,7 @@ sift/
     tasks.py             # the Celery task that runs ingestion in the background
     celery_app.py        # the Celery app (Redis broker)
     retrieval.py         # vector + keyword search, RRF fusion, the relevance gate
-    rag.py               # build the grounded prompt + citations; the refusal response
+    rag.py               # LangChain (LCEL) answer chain: prompt | model | parser, + citations/refusal
     agent.py             # the LangGraph state machine (retrieve/grade/rewrite/generate/refuse)
     main.py              # FastAPI app and endpoints
   tests/

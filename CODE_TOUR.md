@@ -53,9 +53,13 @@ The most decision-dense file after the agent.
 - **`retrieve`** — in `vector` mode, keep matches above `min_score`. In `hybrid` mode, fuse vector + keyword by RRF, then apply the **relevance gate**: a chunk counts if it's a strong semantic match OR a literal keyword match. Nothing passing → returns `[]` → the agent refuses.
 - **Probe — "why hybrid?"** → "Semantic search misses exact terms, keyword misses meaning; RRF fuses them. And the threshold gate is what lets the system refuse instead of answering from junk."
 
-## 10. `rag.py` — turning chunks into a grounded answer
+## 10. `rag.py` — the grounded answer, composed with LangChain (LCEL)
 
-`generate_answer(hits, question)` numbers the chunks, builds the *"answer using ONLY the context … say you don't know"* prompt, calls the model, and returns the answer with **citations** (source filename + chunk index, from your own code — so they can't be hallucinated). `refusal()` is the "I don't know" response. **Probe — "how are citations trustworthy?"** → "They come from my code knowing which chunks it sent, not from the model."
+The chain is `ANSWER_CHAIN = PROMPT | RunnableLambda(_call_model) | StrOutputParser()`. A `ChatPromptTemplate` keeps the guardrail in its **system** message and takes `{context}` and `{question}`; the model step wraps our own Ollama client, so there's still exactly one place that talks to the model; `StrOutputParser` returns a clean string. Every piece is a **Runnable**, which is why they pipe together — that's LCEL.
+
+`generate_answer(hits, question)` numbers the chunks, invokes that chain, and returns the answer with **citations** (source filename + chunk index, from your own code — so they can't be hallucinated). `refusal()` is the "I don't know" response. **Probe — "how did you use LangChain?"** → "The answer path is an LCEL chain — a ChatPromptTemplate fills the retrieved context and question, a Runnable calls the model, and a StrOutputParser returns a clean string, piped together as `prompt | model | parser`. Everything's a Runnable so it composes, and swapping the model means swapping one step."
+
+**Probe — "how are citations trustworthy?"** → "They come from my code knowing which chunks it sent, not from the model."
 
 ## 11. `agent.py` — the LangGraph agentic loop (the headline)
 

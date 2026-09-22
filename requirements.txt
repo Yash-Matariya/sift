@@ -22,5 +22,8 @@ pypdf==5.0.1
 celery[redis]==5.4.0
 langgraph==0.2.60
 
+# LangChain: prompt templates, output parsers and LCEL for the answer chain
+langchain-core==0.3.86
+
 # Testing
 pytest==8.3.3
