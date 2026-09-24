@@ -1,0 +1,173 @@
+ACME CORP EMPLOYEE HANDBOOK
+Revised February 2026. Supersedes all previous versions.
+
+
+1. REMOTE WORK — ELIGIBILITY
+
+All full-time employees who have completed their probation period of three
+months are eligible to work remotely. Contractors are not eligible under this
+policy and should refer to their individual agreements. Employees on a formal
+performance improvement plan are required to work from an office for the
+duration of that plan.
+
+Eligibility is not transferable between teams. An employee moving to a new team
+retains remote eligibility but must agree core hours afresh with the new
+manager within two weeks of the move.
+
+
+2. REMOTE WORK — CORE HOURS
+
+Remote employees must be reachable between 11:00 and 16:00 in the timezone of
+their assigned team. Outside core hours, employees may arrange their schedule
+as they see fit, provided commitments to colleagues and customers are met.
+
+Meetings should not be scheduled outside core hours without the agreement of
+everyone invited. Recurring meetings outside core hours require director
+approval and must be reviewed every quarter.
+
+
+3. REMOTE WORK — EQUIPMENT
+
+The company provides a laptop and one external monitor to every employee. A
+docking station is available on request. Employees may claim up to 300 GBP per
+year towards a desk or chair. Claims require a receipt and manager approval
+before purchase, not after. Approval obtained after a purchase will not be
+honoured.
+
+Equipment remains company property and must be returned within ten working days
+of the last day of employment. The desk and chair allowance is an exception:
+those items belong to the employee once the claim is settled.
+
+
+4. REMOTE WORK — OFFICE ATTENDANCE
+
+Employees living more than 80 kilometres from the nearest office are not
+required to attend in person. Those within 80 kilometres are expected in the
+office two days per month, and travel for these days is not reimbursed.
+
+Team offsites are separate from the monthly attendance expectation. Travel and
+accommodation for an offsite are arranged and paid for by the company, and
+attendance at offsites is expected regardless of distance.
+
+
+5. REMOTE WORK — SECURITY
+
+Remote work must not be conducted over public wifi without the company VPN.
+Devices must have full-disk encryption enabled. Screens must be locked when
+unattended, including at home.
+
+Company data must not be copied to personal devices or personal cloud storage
+under any circumstances. Suspected device loss or theft must be reported to
+the security team within four hours, at any hour of the day.
+
+
+6. EXPENSES — SUBMISSION
+
+Expenses must be submitted within sixty days of the date on the receipt.
+Submissions after sixty days require a written explanation and are approved at
+the discretion of the finance team. Expenses over 500 GBP require approval
+before the money is spent.
+
+Receipts must be legible and show the date, the vendor and the amount. A card
+statement is not a receipt. Expenses submitted without a receipt are rejected
+regardless of amount.
+
+
+7. EXPENSES — TRAVEL
+
+Standard class rail travel is reimbursed in full. First class is reimbursed
+only where it was cheaper than standard at the time of booking, and the
+comparison must be attached to the claim. Flights of under four hours are
+booked in economy.
+
+Mileage in a personal vehicle is reimbursed at 45 pence per mile for the first
+ten thousand miles in a tax year, and 25 pence per mile thereafter. Parking and
+tolls are reimbursed; speeding and parking fines are not.
+
+
+8. EXPENSES — MEALS
+
+Where an employee is required to stay away overnight, meals are reimbursed up
+to 40 GBP per day. Alcohol is not reimbursed. Client entertainment is handled
+separately and requires prior director approval.
+
+Meals during a normal working day at a normal place of work are not reimbursed,
+whether the employee is at home or in an office.
+
+
+9. LEAVE — ANNUAL LEAVE
+
+Full-time employees receive twenty-eight days of annual leave per year,
+inclusive of public holidays. Leave accrues monthly from the start date. Up to
+five unused days may be carried into the following year and must be taken by
+31 March or they are lost.
+
+Leave requests of five consecutive days or fewer require manager approval.
+Longer requests require manager and director approval, and should be submitted
+at least four weeks in advance.
+
+
+10. LEAVE — SICK LEAVE
+
+Sick leave is not deducted from annual leave. Absences of up to seven
+consecutive days may be self-certified. Beyond seven days a fit note from a
+doctor is required and must be sent to the people team, not to the line
+manager.
+
+Employees are asked to notify their manager before 10:00 on the first day of
+absence, by message or call. There is no expectation of a reason beyond
+"unwell".
+
+
+11. LEAVE — PARENTAL LEAVE
+
+Primary caregivers receive twenty-six weeks of leave at full pay, followed by
+thirteen weeks at statutory pay. Secondary caregivers receive eight weeks at
+full pay. Both must have twelve months of continuous service at the expected
+date of birth or placement.
+
+Parental leave may be taken in up to three separate blocks within the first
+eighteen months, by agreement with the manager.
+
+
+12. WORKING PRACTICES — CODE REVIEW
+
+Every change to production code is reviewed by at least one other engineer
+before it is merged. Reviews are expected within one working day. A review is
+a conversation, not a gate: an approving review with comments is normal, and
+the author decides which suggestions to act on unless a comment is marked as
+blocking.
+
+Changes larger than four hundred lines should be split where possible. Reviewers
+are entitled to ask for a large change to be broken up before reviewing it.
+
+
+13. WORKING PRACTICES — ON CALL
+
+On-call rotations run for one week, beginning Wednesday at 10:00. No engineer
+is placed on call within their first three months. Compensation is 200 GBP per
+week on call, plus 75 GBP for any night in which an incident page is received.
+
+Time worked overnight during an incident is taken back as time off in lieu
+within the following two weeks, arranged with the manager.
+
+
+14. WORKING PRACTICES — INCIDENTS
+
+Every incident of severity two or above gets a written review within five
+working days. Reviews are blameless: they describe what the system allowed to
+happen, not who typed the command. Naming individuals as causes is not
+permitted in a review document.
+
+Action items from a review are assigned an owner and a date, and are tracked to
+completion in the same way as any other work.
+
+
+15. EQUIPMENT AND ACCOUNTS — JOINING
+
+New joiners receive their laptop on or before their first day. Accounts are
+provisioned by the end of the first morning. A buddy is assigned for the first
+month and is expected to make contact before the start date.
+
+Anyone who has not received working accounts by the end of their first day
+should contact the people team directly rather than waiting.

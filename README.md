@@ -141,12 +141,54 @@ mock the model and need no services. The database-integration tests use real
 Postgres with pgvector and **skip automatically** when it isn't available (set
 `TEST_DATABASE_URL` to run them, e.g. against the compose `db`).
 
+## Measuring it
+
+A RAG system nobody measures is one nobody can improve, because every change is
+a guess. There is a labelled set of 20 questions over an 11-chunk handbook —
+15 the document answers and 5 it does not — and two numbers:
+
+```bash
+docker compose up -d db
+.venv/bin/python -m eval.run
+```
+
+```
+  recall@k           100%   (15 answerable questions)
+  refusal accuracy   100%   (5 unanswerable questions)
+```
+
+**recall@k** is of the answerable questions, how often retrieval surfaced a
+passage containing the answer. If this is low the model never sees the answer
+and no prompt change will help. **Refusal accuracy** is of the unanswerable
+questions, how often it correctly declined.
+
+They are reported together on purpose: refusing everything scores 100% on the
+second, so the report also lists every *false* refusal.
+
+**The numbers can fail, which is the point.** An earlier version of this set
+scored 100% against a two-chunk document while `top_k` was 4 — every chunk was
+retrieved for every question, so recall could not fail and measured nothing.
+The corpus is now large enough that retrieval has to choose, and degrading it
+on purpose moves the numbers:
+
+| | recall@k |
+|---|---|
+| as shipped | 100% |
+| `TOP_K=1` | 93% |
+| `MIN_SCORE=0.9` (gate too strict) | **13%**, and the run fails |
+
+That last row is the tradeoff made visible: you can push refusal accuracy up by
+raising the threshold, and it costs you the answers.
+
+The metric functions in `app/evaluation.py` are pure, so they are unit-tested
+without a database, an embedding model or an LLM.
+
 ## Possible next steps (not built)
 
-Honest roadmap, so the scope is clear: a reranking pass over retrieved chunks; a
-`recall@k` / faithfulness evaluation harness on a labelled question set; streaming
-answers token-by-token; per-user auth and document isolation; and Alembic
-migrations in place of `create_all` for schema changes.
+Honest roadmap, so the scope is clear: a reranking pass over retrieved chunks;
+faithfulness scoring (does the answer only claim what the context supports);
+streaming answers token-by-token; per-user auth and document isolation; and
+Alembic migrations in place of `create_all` for schema changes.
 
 ## The companion project
 
