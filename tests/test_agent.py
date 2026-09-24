@@ -80,3 +80,46 @@ def test_loop_is_bounded_then_best_effort(monkeypatch):
     assert calls["retrieve"] == settings.max_retrieval_attempts
     assert calls["rewrite"] == settings.max_retrieval_attempts - 1
     assert calls["generate"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The trace: the agent's own account of what it did.
+#
+# It is assembled from the graph's final state rather than tracked separately,
+# so these tests are really checking that the trace cannot drift from reality.
+# ---------------------------------------------------------------------------
+
+def test_trace_reports_a_single_confident_retrieval(monkeypatch):
+    _install(monkeypatch, [[_hit(0.9)]])
+    resp = agent.answer_question(session=None, question="what is the policy?")
+
+    assert resp.trace is not None
+    assert resp.trace.attempts == 1
+    assert resp.trace.rewritten is False          # the first query was good enough
+    assert resp.trace.final_query == "what is the policy?"
+    assert resp.trace.best_score == 0.9
+    assert resp.trace.chunks_found == 1
+
+
+def test_trace_records_the_rewrite(monkeypatch):
+    # weak first, confident second -> the agent rewrote, and the trace says so
+    _install(monkeypatch, [[_hit(0.4)], [_hit(0.9)]])
+    resp = agent.answer_question(session=None, question="original wording")
+
+    assert resp.trace.attempts == 2
+    assert resp.trace.rewritten is True
+    assert resp.trace.final_query != "original wording"
+
+
+def test_trace_survives_a_refusal(monkeypatch):
+    # A refusal is the most interesting case to explain, so it must carry a
+    # trace too -- "it tried N times and found nothing" is the whole answer.
+    empties = [[] for _ in range(settings.max_retrieval_attempts + 2)]
+    _install(monkeypatch, empties)
+    resp = agent.answer_question(session=None, question="unrelated question")
+
+    assert resp.refused is True
+    assert resp.trace is not None
+    assert resp.trace.attempts == settings.max_retrieval_attempts
+    assert resp.trace.chunks_found == 0
+    assert resp.trace.best_score == 0.0

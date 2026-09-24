@@ -15,7 +15,11 @@ services:
       POSTGRES_PASSWORD: sift
       POSTGRES_DB: sift
     ports:
-      - "5432:5432"
+      # 5435 on the host, not 5432. A locally-installed Postgres commonly owns
+      # 5432 and binds localhost specifically, while Docker binds the wildcard --
+      # so localhost:5432 silently reaches the native server and you get
+      # "role sift does not exist" from a database you never meant to use.
+      - "5435:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

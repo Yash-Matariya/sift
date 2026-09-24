@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # --- database ---
-    database_url: str = "postgresql+psycopg://sift:sift@localhost:5432/sift"
+    database_url: str = "postgresql+psycopg://sift:sift@localhost:5435/sift"
 
     # --- Ollama (local LLM + embeddings; free, no API key) ---
     ollama_url: str = "http://localhost:11434"

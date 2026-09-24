@@ -12,7 +12,10 @@ document is `ready`.
 """
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, UploadFile, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -88,3 +91,23 @@ def chat(req: ChatRequest, session: Session = Depends(get_session)):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="question is required")
     return answer_question(session, req.question)
+
+
+# ---------------------------------------------------------------------------
+# The UI.
+#
+# A single static page, served by the API that powers it. No build step and no
+# npm: this is a Python project, and a front end you cannot open without a
+# toolchain is a worse demo, not a better one.
+#
+# Declared last so it can never shadow an API route, and by explicit file path
+# rather than a mounted directory, so nothing else in the package is exposed.
+# ---------------------------------------------------------------------------
+
+_UI = Path(__file__).parent / "static" / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def ui():
+    """The chat interface. /docs still has the interactive API."""
+    return FileResponse(_UI)

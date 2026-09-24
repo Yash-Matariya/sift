@@ -12,11 +12,29 @@ You give Sift a set of documents (PDF, text, markdown). It splits them into smal
 
 That is **Retrieval-Augmented Generation (RAG)** — and the exact thing this job's LangChain / LangGraph / RAG lines are about.
 
+## Try it
+
+```bash
+docker compose up -d db redis
+ollama pull nomic-embed-text && ollama pull llama3.2
+.venv/bin/celery -A app.celery_app.celery worker --loglevel=info &
+.venv/bin/uvicorn app.main:app
+# open http://localhost:8000
+```
+
+Upload a document, wait for it to say **ready**, then ask something it covers —
+and something it does not. The second one is the interesting case.
+
+The UI is a single static page served by the API itself. No build step and no
+npm: this is a Python project, and a front end you cannot open without a
+toolchain would be a worse demo, not a better one.
+
 ## What it does (the features that are built)
 
 - **Agentic RAG loop (LangGraph).** Not "search, then answer." A small state machine: *retrieve → grade whether the results are strong enough → if weak, rewrite the query and retrieve again (bounded) → answer with citations, or refuse.* That grade-and-maybe-retry-or-refuse loop is what makes it trustworthy.
 - **Hybrid retrieval.** Fuses **vector search (pgvector, cosine)** with **keyword search (Postgres full-text)** using **Reciprocal Rank Fusion**, because semantic search misses exact terms (codes, names) and keyword search misses meaning. A similarity threshold gates relevance and drives refusal.
-- **Citations + refusal.** Every answer lists the source passages it used; when nothing relevant is retrieved, it declines rather than inventing.
+- **Citations + refusal, on two levels.** Every answer lists the source passages it used. It declines when nothing relevant is retrieved *and* when the passages were retrieved but still do not answer the question — in that second case the model itself says so, and the response is reported as a refusal with no citations attached. Sources under "I don't know" would imply the answer came from them.
+- **A visible agent trace.** Every response carries what the agent actually did: how many times it retrieved, whether it gave up on your wording and rewrote the query, the best similarity it found, and how many passages passed the gate. That is what makes "agentic" observable instead of a claim.
 - **Background ingestion (Celery).** Uploads return immediately (202 `pending`); a Celery worker chunks and embeds in the background and flips the document to `ready`. The task is **idempotent** (it clears existing chunks first) and **retries with backoff**, so a transient failure recovers without duplicating data.
 - **Local + reproducible.** LLM and embeddings run locally via **Ollama** (free, no API key, data stays on the machine); the whole stack — Postgres/pgvector, Redis, Ollama, the API, and the worker — comes up with one `docker compose up`.
 

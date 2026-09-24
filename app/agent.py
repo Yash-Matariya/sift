@@ -28,7 +28,7 @@ from app.config import settings
 from app.llm import generate
 from app.retrieval import retrieve
 from app.rag import generate_answer, refusal
-from app.models import ChatResponse
+from app.models import AgentTrace, ChatResponse
 
 
 class AgentState(TypedDict, total=False):
@@ -99,7 +99,23 @@ def build_graph(session: Session):
 
 
 def answer_question(session: Session, question: str) -> ChatResponse:
-    """Run the agentic RAG loop and return the answer (or refusal)."""
+    """Run the agentic RAG loop and return the answer (or refusal), with a trace.
+
+    The trace is assembled from the final state rather than tracked separately,
+    so it cannot drift from what the graph actually did.
+    """
     graph = build_graph(session)
     final = graph.invoke({"question": question, "query": question, "attempts": 0})
-    return final["response"]
+
+    response = final["response"]
+    hits = final.get("hits", [])
+    final_query = final.get("query", question)
+
+    response.trace = AgentTrace(
+        attempts=final.get("attempts", 0),
+        rewritten=final_query.strip() != question.strip(),
+        final_query=final_query,
+        best_score=round(_best_score(hits), 4),
+        chunks_found=len(hits),
+    )
+    return response

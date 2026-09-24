@@ -71,7 +71,24 @@ class Citation(BaseModel):
     text: str              # the passage itself
 
 
+class AgentTrace(BaseModel):
+    """What the agent actually did to reach its answer.
+
+    The agent already tracked all of this internally; exposing it is what makes
+    the "agentic" part observable instead of a claim. A caller can see that a
+    weak first retrieval was graded, the query rewritten, and the search run
+    again -- which is the whole difference between this and plain RAG.
+    """
+
+    attempts: int                  # how many retrievals it took
+    rewritten: bool                # did it give up on the original wording?
+    final_query: str               # what it actually searched for in the end
+    best_score: float              # similarity of the strongest chunk found
+    chunks_found: int              # how many passed the relevance gate
+
+
 class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     refused: bool          # True when we declined because nothing relevant was found
+    trace: AgentTrace | None = None   # optional so tests can build a bare response

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sift — ask your documents</title>
+<meta name="description" content="Upload documents and ask questions. Answers cite their sources, and the assistant says 'I don't know' rather than guessing." />
+<style>
+  /* No build step on purpose: this is a Python project, and a UI that needs
+     npm to look at would be a worse demo, not a better one. */
+  :root {
+    --bg:#0c0d10; --panel:#131519; --panel-2:#181b20; --line:#23262d;
+    --ink:#e7e9ee; --ink-dim:#9aa1ad; --ink-faint:#6b7280;
+    --accent:#6ea8fe; --good:#4ade80; --warn:#fbbf24; --bad:#f87171;
+    --radius:10px;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  .wrap { max-width:1040px; margin:0 auto; padding:0 20px 64px; }
+
+  header { border-bottom:1px solid var(--line); margin-bottom:28px; }
+  .head-in { max-width:1040px; margin:0 auto; padding:18px 20px;
+             display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:19px; margin:0; letter-spacing:-.01em; }
+  .tag { color:var(--ink-faint); font-size:13px; }
+  .spacer { margin-left:auto; }
+
+  .panel { background:var(--panel); border:1px solid var(--line);
+           border-radius:var(--radius); padding:18px; margin-bottom:18px; }
+  h2 { font-size:14px; margin:0 0 4px; font-weight:600; }
+  .hint { color:var(--ink-dim); font-size:13px; margin:0 0 14px; }
+
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  input[type=text], input[type=file] {
+    flex:1; min-width:220px; background:#0a0b0e; color:var(--ink);
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:14px;
+  }
+  input[type=text]:focus, input[type=file]:focus {
+    outline:none; border-color:var(--accent);
+  }
+  button {
+    background:var(--accent); color:#0a0b0e; border:0; border-radius:8px;
+    padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer;
+    transition:filter .15s, transform .05s;
+  }
+  button:hover:not(:disabled) { filter:brightness(1.1); }
+  button:active:not(:disabled) { transform:translateY(1px); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--ink-dim); border:1px solid var(--line); }
+
+  .docs { display:flex; flex-direction:column; gap:7px; margin-top:14px; }
+  .doc { display:flex; align-items:center; gap:10px; font-size:13px;
+         background:var(--panel-2); border:1px solid var(--line);
+         border-radius:8px; padding:8px 12px; }
+  .doc .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:600;
+          letter-spacing:.02em; }
+  .pending    { background:#3a2f12; color:var(--warn); }
+  .processing { background:#12293a; color:var(--accent); }
+  .ready      { background:#12301f; color:var(--good); }
+  .failed     { background:#3a1616; color:var(--bad); }
+
+  /* The answer */
+  .answer { white-space:pre-wrap; font-size:15px; line-height:1.7; }
+  .refused { border-left:3px solid var(--warn); padding-left:14px; color:var(--ink-dim); }
+
+  /* The agent trace — the part that makes "agentic" visible rather than claimed */
+  .trace { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 0; }
+  .step { font-size:12px; background:var(--panel-2); border:1px solid var(--line);
+          border-radius:999px; padding:4px 11px; color:var(--ink-dim); }
+  .step b { color:var(--ink); font-weight:600; }
+  .step.hl { border-color:var(--accent); color:var(--accent); }
+
+  .cites { margin-top:18px; border-top:1px solid var(--line); padding-top:14px; }
+  .cite { background:var(--panel-2); border:1px solid var(--line);
+          border-radius:8px; padding:11px 13px; margin-bottom:8px; font-size:13px; }
+  .cite .src { color:var(--accent); font-size:12px; font-weight:600; margin-bottom:5px; }
+  .cite .txt { color:var(--ink-dim); line-height:1.55; }
+
+  .err { color:var(--bad); font-size:13px; margin-top:10px; }
+  .muted { color:var(--ink-faint); font-size:13px; }
+
+  /* Skeleton, so the panel does not jump when the answer lands */
+  .sk { height:12px; border-radius:6px; background:linear-gradient(90deg,#1a1d23,#23262d,#1a1d23);
+        background-size:200% 100%; animation:sh 1.2s linear infinite; margin-bottom:9px; }
+  @keyframes sh { to { background-position:-200% 0; } }
+
+  footer { color:var(--ink-faint); font-size:12px; text-align:center; margin-top:32px; }
+  a { color:var(--accent); }
+  @media (max-width:640px){ .head-in{padding:14px 16px} .wrap{padding:0 16px 48px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="head-in">
+    <h1>Sift</h1>
+    <span class="tag">ask your documents — answers cite their sources</span>
+    <span class="spacer"></span>
+    <span class="tag" id="docCount"></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="panel">
+    <h2>1 &nbsp;Add a document</h2>
+    <p class="hint">PDF, text or markdown. Chunking and embedding run in a background worker, so the upload returns straight away and the status flips to <em>ready</em> when it is searchable.</p>
+    <form class="row" id="up">
+      <input type="file" id="file" accept=".pdf,.txt,.md" required />
+      <button id="upBtn">Upload</button>
+    </form>
+    <div class="docs" id="docs"></div>
+    <div class="err" id="upErr"></div>
+  </section>
+
+  <section class="panel">
+    <h2>2 &nbsp;Ask a question</h2>
+    <p class="hint">The agent retrieves, grades whether what it found is actually good enough, rewrites the query and tries again if it is not — then answers from those passages, or declines.</p>
+    <form class="row" id="ask">
+      <input type="text" id="q" placeholder="What does the document say about…" required />
+      <button id="askBtn">Ask</button>
+    </form>
+    <div class="err" id="askErr"></div>
+  </section>
+
+  <section class="panel" id="out" hidden>
+    <h2 id="outTitle">Answer</h2>
+    <div id="answer" class="answer"></div>
+    <div class="trace" id="trace"></div>
+    <div class="cites" id="cites" hidden>
+      <h2>Sources</h2>
+      <p class="hint">Built from the passages actually sent to the model — so they cannot be invented.</p>
+      <div id="citeList"></div>
+    </div>
+  </section>
+
+  <footer>
+    Runs locally: FastAPI, Postgres with pgvector, Celery, LangGraph, Ollama.
+    <a href="/docs">API docs</a>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const docs = new Map();          // id -> {filename, status}
+let pollTimer = null;
+
+// ---- documents ------------------------------------------------------------
+
+function renderDocs() {
+  $("docs").innerHTML = [...docs.entries()].map(([id, d]) => `
+    <div class="doc">
+      <span class="name">${esc(d.filename)}</span>
+      <span class="pill ${d.status}">${d.status}</span>
+    </div>`).join("");
+  const ready = [...docs.values()].filter(d => d.status === "ready").length;
+  $("docCount").textContent = docs.size ? `${ready} of ${docs.size} ready` : "";
+}
+
+$("up").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = $("file").files[0];
+  if (!f) return;
+  $("upBtn").disabled = true; $("upErr").textContent = "";
+  try {
+    const body = new FormData();
+    body.append("file", f);
+    const res = await fetch("/documents", { method: "POST", body });
+    if (!res.ok) throw new Error(await message(res));
+    const doc = await res.json();
+    docs.set(doc.id, { filename: doc.filename, status: doc.status });
+    renderDocs();
+    startPolling();
+    $("up").reset();
+  } catch (err) {
+    $("upErr").textContent = err.message;
+  } finally {
+    $("upBtn").disabled = false;
+  }
+});
+
+// Poll only while something is still being processed, and stop as soon as
+// everything is settled — a timer that never stops is a battery leak.
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    const unsettled = [...docs.entries()].filter(([, d]) =>
+      d.status === "pending" || d.status === "processing");
+    if (!unsettled.length) { clearInterval(pollTimer); pollTimer = null; return; }
+    for (const [id] of unsettled) {
+      try {
+        const res = await fetch(`/documents/${id}`);
+        if (!res.ok) continue;
+        const d = await res.json();
+        docs.set(id, { filename: d.filename, status: d.status });
+      } catch { /* transient: try again on the next tick */ }
+    }
+    renderDocs();
+  }, 1500);
+}
+
+// ---- asking ---------------------------------------------------------------
+
+$("ask").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = $("q").value.trim();
+  if (!question) return;
+
+  $("askBtn").disabled = true; $("askErr").textContent = "";
+  $("out").hidden = false;
+  $("outTitle").textContent = "Thinking";
+  $("answer").innerHTML = `<div class="sk" style="width:92%"></div>
+                           <div class="sk" style="width:78%"></div>
+                           <div class="sk" style="width:85%"></div>`;
+  $("trace").innerHTML = ""; $("cites").hidden = true;
+
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    if (!res.ok) throw new Error(await message(res));
+    render(await res.json());
+  } catch (err) {
+    $("out").hidden = true;
+    $("askErr").textContent = err.message;
+  } finally {
+    $("askBtn").disabled = false;
+  }
+});
+
+function render(r) {
+  $("outTitle").textContent = r.refused ? "No answer" : "Answer";
+  $("answer").textContent = r.answer;
+  $("answer").className = r.refused ? "answer refused" : "answer";
+
+  // The trace is the interesting part: it shows the agent decided rather than
+  // just searched once.
+  if (r.trace) {
+    const t = r.trace;
+    const steps = [
+      `<span class="step">retrieved <b>${t.attempts}×</b></span>`,
+      t.rewritten
+        ? `<span class="step hl">rewrote the query → <b>${esc(t.final_query)}</b></span>`
+        : `<span class="step">first query was good enough</span>`,
+      `<span class="step">best match <b>${t.best_score.toFixed(2)}</b></span>`,
+      `<span class="step">${t.chunks_found === 0
+          ? "nothing passed the relevance gate"
+          : `<b>${t.chunks_found}</b> passage${t.chunks_found === 1 ? "" : "s"} used`}</span>`,
+    ];
+    $("trace").innerHTML = steps.join("");
+  }
+
+  if (r.citations && r.citations.length) {
+    $("citeList").innerHTML = r.citations.map(c => `
+      <div class="cite">
+        <div class="src">${esc(c.document)} · chunk ${c.chunk_index}</div>
+        <div class="txt">${esc(c.text)}</div>
+      </div>`).join("");
+    $("cites").hidden = false;
+  }
+}
+
+// ---- helpers --------------------------------------------------------------
+
+// Everything from the server is inserted as text, never as HTML. A document
+// containing markup must not be able to run script in this page.
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, ch => (
+    { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+}
+
+async function message(res) {
+  try {
+    const b = await res.json();
+    return b.detail || b.message || `Request failed (${res.status})`;
+  } catch {
+    return `Request failed (${res.status})`;
+  }
+}
+</script>
+</body>
+</html>
