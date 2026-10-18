@@ -49,8 +49,17 @@ ANSWER_CHAIN = PROMPT | RunnableLambda(_call_model) | StrOutputParser()
 # non-answer as though it were an answer, with citations attached to it.
 #
 # This is not fragile phrase-guessing at arbitrary prose. It checks for the one
-# behaviour the prompt asked for, and only on a short reply, so an answer that
-# happens to *discuss* not knowing something is not mistaken for a refusal.
+# behaviour the prompt asked for, in one of two shapes:
+#
+#   - the reply OPENS with it: "I don't know. The context only covers remote
+#     work, expenses and leave..." The explanation after it can be any length.
+#     An earlier version only looked at replies of 200 characters or less, so
+#     when the model explained its refusal, the refusal was reported as an
+#     answer, with citations -- the eval caught it on "Who is the CEO?".
+#   - a SHORT reply contains it anywhere ("Sorry, I don't know.").
+#
+# A long reply that merely mentions not knowing somewhere in the middle is an
+# answer that discusses it, and is left alone.
 _DECLINE_PHRASES = (
     "i don't know",
     "i do not know",
@@ -64,17 +73,27 @@ _DECLINE_MAX_CHARS = 200
 
 def _model_declined(answer: str) -> bool:
     """Did the model follow the prompt's instruction to admit it doesn't know?"""
-    stripped = answer.strip().lower()
+    stripped = answer.strip().lower().replace("\u2019", "'")   # curly apostrophe
+    if stripped.startswith(_DECLINE_PHRASES):
+        return True
     if len(stripped) > _DECLINE_MAX_CHARS:
         return False
     return any(phrase in stripped for phrase in _DECLINE_PHRASES)
 
 
+def _sources(chunk) -> str:
+    """Where a passage came from, including any word-for-word copies retrieval merged into it."""
+    names = [c.document.filename for c in [chunk, *getattr(chunk, "duplicates", [])]]
+    return ("source: " if len(names) == 1 else "sources: ") + ", ".join(names)
+
+
 def generate_answer(hits, question: str) -> ChatResponse:
     """Build the grounded prompt from the retrieved chunks and answer, with citations."""
     # Number the chunks so the context is clear and citations line up with sources.
+    # Each passage once; if the same text is in several documents, the model is told every
+    # source, so it can say so in its answer.
     context = "\n\n".join(
-        f"[{i + 1}] {chunk.text}" for i, (chunk, _) in enumerate(hits)
+        f"[{i + 1}] ({_sources(chunk)}) {chunk.text}" for i, (chunk, _) in enumerate(hits)
     )
     answer = ANSWER_CHAIN.invoke({"context": context, "question": question})
 
@@ -85,10 +104,9 @@ def generate_answer(hits, question: str) -> ChatResponse:
         return ChatResponse(answer=answer.strip(), citations=[], refused=True)
 
     citations = [
-        Citation(document=chunk.document.filename,
-                 chunk_index=chunk.chunk_index,
-                 text=chunk.text)
+        Citation(document=c.document.filename, chunk_index=c.chunk_index, text=c.text)
         for chunk, _ in hits
+        for c in [chunk, *getattr(chunk, "duplicates", [])]
     ]
     return ChatResponse(answer=answer, citations=citations, refused=False)
 

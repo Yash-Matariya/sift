@@ -85,6 +85,8 @@ class AgentTrace(BaseModel):
     final_query: str               # what it actually searched for in the end
     best_score: float              # similarity of the strongest chunk found
     chunks_found: int              # how many passed the relevance gate
+    searches: int = 1              # how many searches the question was split into
+    widened: bool = False          # did it search wider after the model first said it didn't know?
 
 
 class ChatResponse(BaseModel):

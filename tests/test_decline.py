@@ -78,3 +78,20 @@ def test_other_instructed_phrasings_are_caught(monkeypatch):
     for reply in ("The context does not contain that information.",
                   "I don't have enough information to answer."):
         assert _answer_with(monkeypatch, reply).refused is True, reply
+
+
+def test_a_refusal_that_goes_on_to_explain_itself_is_still_a_refusal(monkeypatch):
+    # The reply llama3.1:8b gave in the eval for "Who is the CEO of Acme Corp?".
+    # It is 230 characters, and a rule that only checked short replies called it
+    # an answer and attached citations to it.
+    r = _answer_with(monkeypatch, (
+        "I don't know. The provided context does not mention the CEO of Acme "
+        "Corp. It only contains information about the company's remote work "
+        "policy, employee handbook, expenses, leave and on-call arrangements."
+    ))
+    assert r.refused is True
+    assert r.citations == []
+
+
+def test_a_curly_apostrophe_is_the_same_refusal(monkeypatch):
+    assert _answer_with(monkeypatch, "I don’t know.").refused is True

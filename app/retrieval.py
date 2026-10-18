@@ -41,7 +41,7 @@ def rrf_fuse(ranked_lists: list[list[int]], k: int, rrf_k: int | None = None) ->
 
 def _vector_search(session: Session, question: str, limit: int):
     """Return [(chunk, similarity)] for the nearest chunks by cosine distance."""
-    query_vec = embed(question)
+    query_vec = embed(settings.embed_query_prefix + question)
     # cosine_distance: 0 = identical direction, 2 = opposite. similarity = 1 - distance.
     distance = Chunk.embedding.cosine_distance(query_vec).label("distance")
     rows = session.execute(
@@ -61,38 +61,74 @@ def _keyword_search(session: Session, question: str, limit: int):
     return [chunk for chunk, _ in rows]
 
 
-def retrieve(session: Session, question: str, k: int | None = None):
-    """Return [(chunk, score)] for the top-k relevant chunks, or [] if none qualify."""
+def _same_text(text: str) -> str:
+    """The key two passages share when they are word-for-word the same (spacing and case aside)."""
+    return " ".join(text.split()).lower()
+
+
+def _one_per_text(candidates):
+    """Keep one copy of passages that are word-for-word identical.
+
+    Uploading a file twice stores every passage twice. Without this, the copies take several
+    of the top-k slots with the same information and push other documents out entirely: three
+    copies of a handbook filled all four slots and an email holding the answer never reached
+    the model. The kept passage remembers the others in `.duplicates`, so the answer can still
+    cite every place the text appears.
+    """
+    kept, seen = [], {}
+    for chunk, score in candidates:
+        key = _same_text(chunk.text)
+        if key in seen:
+            seen[key].duplicates.append(chunk)
+            continue
+        chunk.duplicates = []
+        seen[key] = chunk
+        kept.append((chunk, score))
+    return kept
+
+
+def retrieve(session: Session, question: str, k: int | None = None, extra_queries=()):
+    """Return [(chunk, score)] for the top-k relevant chunks, or [] if none qualify.
+
+    `extra_queries` are more searches for the same question (multi-query retrieval): each is
+    searched the same way, and every ranked list is fused together with RRF.
+    """
     k = k or settings.top_k
     wide = max(k, 20)   # retrieve wide, then filter/fuse down to k
+    queries = [question, *[q for q in extra_queries if q and q.strip() != question.strip()]]
 
-    vec = _vector_search(session, question, wide)
-    similarity = {chunk.id: sim for chunk, sim in vec}
-    chunks_by_id = {chunk.id: chunk for chunk, _ in vec}
+    similarity: dict[int, float] = {}
+    chunks_by_id: dict[int, Chunk] = {}
+    ranked_lists: list[list[int]] = []
+    keyword_ids: set[int] = set()
+    for q in queries:
+        vec = _vector_search(session, q, wide)
+        for chunk, sim in vec:
+            chunks_by_id.setdefault(chunk.id, chunk)
+            similarity[chunk.id] = max(sim, similarity.get(chunk.id, -1.0))   # best over the searches
+        ranked_lists.append([chunk.id for chunk, _ in vec])
+        if settings.retrieval_mode == "hybrid":
+            kw = _keyword_search(session, q, wide)
+            for chunk in kw:
+                chunks_by_id.setdefault(chunk.id, chunk)
+                keyword_ids.add(chunk.id)
+            ranked_lists.append([chunk.id for chunk in kw])
 
-    if settings.retrieval_mode != "hybrid":
+    if settings.retrieval_mode != "hybrid" and len(queries) == 1:
         # vector-only: keep strong semantic matches, best first
-        hits = [(chunk, sim) for chunk, sim in vec if sim >= settings.min_score]
-        return hits[:k]
-
-    # hybrid: add keyword matches and fuse the rankings
-    kw = _keyword_search(session, question, wide)
-    keyword_ids = {chunk.id for chunk in kw}
-    for chunk in kw:
-        chunks_by_id.setdefault(chunk.id, chunk)
-
-    vec_ranked = [chunk.id for chunk, _ in vec]
-    kw_ranked = [chunk.id for chunk in kw]
-    fused_ids = rrf_fuse([vec_ranked, kw_ranked], k=wide)
+        ordered = ranked_lists[0]
+    else:
+        # hybrid, or several searches: fuse the rankings
+        ordered = rrf_fuse(ranked_lists, k=wide * len(queries))
 
     # Relevance gate: a chunk counts if it's a strong semantic match OR a literal
     # keyword match. Score is the semantic similarity where known, else min_score
     # for a keyword-only hit. Nothing passing -> [] -> the assistant refuses.
     results = []
-    for cid in fused_ids:
+    for cid in ordered:
         sim = similarity.get(cid)
         if sim is not None and sim >= settings.min_score:
             results.append((chunks_by_id[cid], sim))
         elif cid in keyword_ids:
             results.append((chunks_by_id[cid], settings.min_score))
-    return results[:k]
+    return _one_per_text(results)[:k]

@@ -30,3 +30,13 @@ def save_upload(doc_id: int, filename: str, data: bytes) -> str:
 def read_upload(path: str) -> bytes:
     with open(path, "rb") as f:
         return f.read()
+
+
+def delete_upload(path: str | None) -> None:
+    """Remove a saved upload. A file that is already gone is fine: deleting is the goal."""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass

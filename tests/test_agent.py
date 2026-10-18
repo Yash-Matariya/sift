@@ -123,3 +123,59 @@ def test_trace_survives_a_refusal(monkeypatch):
     assert resp.trace.attempts == settings.max_retrieval_attempts
     assert resp.trace.chunks_found == 0
     assert resp.trace.best_score == 0.0
+
+
+# ---- multi-query and the wider second look ----------------------------------
+
+def test_expand_queries_keeps_clean_lines_and_drops_junk(monkeypatch):
+    monkeypatch.setattr(settings, "multi_query", True)
+    monkeypatch.setattr(agent, "generate",
+                        lambda prompt: "1. company name\n- my email address\n\nI'm sorry, I can't\nq\nextra one\nfourth")
+    assert agent.expand_queries("q") == ["company name", "my email address", "extra one"]
+
+
+def test_expand_queries_falls_back_to_none_when_the_model_is_down(monkeypatch):
+    monkeypatch.setattr(settings, "multi_query", True)
+
+    def down(prompt):
+        raise ConnectionError("ollama is not running")
+
+    monkeypatch.setattr(agent, "generate", down)
+    assert agent.expand_queries("company and my email?") == []
+
+
+def test_the_first_retrieval_searches_every_split_out_query(monkeypatch):
+    monkeypatch.setattr(settings, "multi_query", True)
+    seen = {}
+
+    def fake_retrieve(session, query, k=None, extra_queries=()):
+        seen["extra"] = list(extra_queries)
+        return [_hit(0.9)]
+
+    monkeypatch.setattr(agent, "retrieve", fake_retrieve)
+    monkeypatch.setattr(agent, "expand_queries", lambda q: ["company name", "email address"])
+    monkeypatch.setattr(agent, "generate_answer",
+                        lambda hits, q: ChatResponse(answer="a", citations=[], refused=False))
+    resp = agent.answer_question(session=None, question="company and my email?")
+    assert seen["extra"] == ["company name", "email address"]
+    assert resp.trace.searches == 3
+
+
+def test_a_decline_triggers_one_wider_search(monkeypatch):
+    monkeypatch.setattr(settings, "widen_on_decline", True)
+    sizes = []
+
+    def fake_retrieve(session, query, k=None):
+        return [_hit(0.9)] * (12 if k == settings.wide_k else 4)
+
+    def fake_generate_answer(hits, question):
+        sizes.append(len(hits))
+        found = len(hits) > 4                      # the answer was just outside the top 4
+        return ChatResponse(answer="the answer" if found else "I don't know.",
+                            citations=[], refused=not found)
+
+    monkeypatch.setattr(agent, "retrieve", fake_retrieve)
+    monkeypatch.setattr(agent, "generate_answer", fake_generate_answer)
+    resp = agent.answer_question(session=None, question="q")
+    assert sizes == [4, 12]
+    assert resp.answer == "the answer" and resp.trace.widened is True

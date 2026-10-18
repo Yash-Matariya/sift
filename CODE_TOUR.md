@@ -32,7 +32,7 @@ The engine is the connection pool (`pool_pre_ping=True`). `get_session` is the F
 
 ## 6. `ingest.py` — read → chunk → embed → store (idempotently)
 
-- `_read_text` handles PDF (pypdf) and text. `_chunk` splits into overlapping pieces so an idea crossing a boundary survives.
+- `_read_text` handles PDF (pypdf) and text. `_chunk` splits into overlapping pieces so an idea crossing a boundary survives, and moves both edges of each piece to a space so no chunk starts or ends mid-word.
 - **`ingest_into(session, document_id)`** is the pipeline and the file to know: it sets the document `processing`, reads its file, **deletes any existing chunks** (idempotency — a retry can't duplicate), embeds each chunk, stores them, and commits chunks + `ready` status **together in one transaction**. On failure it rolls back, marks the document `failed`, and re-raises.
 - **Probe — "what if ingestion runs twice?"** → "It's idempotent — I clear existing chunks first, so a retry produces the same clean result, no duplicates."
 
@@ -48,9 +48,11 @@ Points Celery at Redis (broker + result backend). `task_always_eager` (from conf
 
 The most decision-dense file after the agent.
 - **`rrf_fuse`** — pure Reciprocal Rank Fusion: merges ranked lists so an item found by *both* vector and keyword search rises to the top. Unit-tested.
-- **`_vector_search`** — embed the question, order by pgvector cosine distance, return `(chunk, similarity)`.
+- **`_vector_search`** — embed the question (with nomic-embed-text's `search_query: ` label; stored passages were embedded with `search_document: `), order by pgvector cosine distance, return `(chunk, similarity)`.
 - **`_keyword_search`** — Postgres full-text (`to_tsvector` / `plainto_tsquery`, ranked by `ts_rank`).
 - **`retrieve`** — in `vector` mode, keep matches above `min_score`. In `hybrid` mode, fuse vector + keyword by RRF, then apply the **relevance gate**: a chunk counts if it's a strong semantic match OR a literal keyword match. Nothing passing → returns `[]` → the agent refuses.
+- **Several searches, one result:** `retrieve(..., extra_queries=[...])` runs the vector and keyword searches for each query and fuses every list with RRF (multi-query retrieval; the agent supplies the extra queries).
+- **One slot per passage:** `_one_per_text` keeps one copy of word-for-word identical passages (a file uploaded twice), and remembers the others in `chunk.duplicates`, so copies can't crowd other documents out of the top-k and the answer can still cite every source.
 - **Probe — "why hybrid?"** → "Semantic search misses exact terms, keyword misses meaning; RRF fuses them. And the threshold gate is what lets the system refuse instead of answering from junk."
 
 ## 10. `rag.py` — the grounded answer, composed with LangChain (LCEL)
@@ -64,8 +66,10 @@ The chain is `ANSWER_CHAIN = PROMPT | RunnableLambda(_call_model) | StrOutputPar
 ## 11. `agent.py` — the LangGraph agentic loop (the headline)
 
 The file that makes it *agentic*, and the one to know cold.
-- **State** (`AgentState`): question, current query, attempts, hits, response.
-- **Nodes:** `retrieve` (search + count the attempt), `rewrite` (LLM rephrases the query for better retrieval), `generate` (grounded answer), `refuse`.
+- **State** (`AgentState`): question, current query, the extra searches, attempts, hits, whether it widened, response.
+- **Multi-query:** on the first retrieval, `expand_queries` asks the model to split the question into the separate things it asks about ("company and my email?" → "company", "my email"), and all of them are searched and fused. If the model is down, the plain search still runs.
+- **A second look:** if `generate` declines although retrieval passed the gate, it searches once more with `wide_k` (12) passages before giving up (`widen_on_decline`).
+- **Nodes:** `retrieve` (search + count the attempt), `rewrite` (LLM rephrases the query for better retrieval; `rewrite_query` keeps the original question if the reply is empty, rambling, or a refusal), `generate` (grounded answer), `refuse`.
 - **`grade`** is the conditional edge — the decision: if the best hit is confident (`>= good_score`) → generate; else if attempts remain → rewrite and loop; else if there's anything → answer best-effort; else → refuse.
 - **The graph:** `START → retrieve → [grade] → generate / rewrite→retrieve (loop) / refuse → END`. The loop is **bounded** by `max_retrieval_attempts`, so it can never spin forever.
 - **Probe — "what makes it agentic, and how is it safe?"** → "It decides — retrieve, grade, and re-retrieve with a rewritten query if the results are weak, bounded so it can't loop forever, then answer or refuse. It's a bounded reason-act-observe loop, a state machine over a shared state."
@@ -75,6 +79,9 @@ The file that makes it *agentic*, and the one to know cold.
 - `POST /documents` — save the file, create a `pending` document, queue `ingest_document_task.delay(id)`, return **202** immediately.
 - `GET /documents/{id}` — poll the status (`pending`/`processing`/`ready`/`failed`).
 - `POST /chat` — validate, then call `agent.answer_question`.
+- `POST /documents/{id}/retry` — queue ingestion again for a `failed` document, or one stuck `pending` (202; 409 if it is already `ready` or `processing`).
+- `DELETE /documents/{id}` — delete the document, its chunks (the relationship cascades) and its stored file (204).
+- **When a dependency is down:** if Redis is unreachable, `.delay()` raises; the upload marks the document `failed` and answers **503** ("the file is saved, but the job queue isn't reachable… press Retry"), instead of a 500 that left it `pending` for ever. If Postgres is unreachable, an exception handler turns SQLAlchemy's `OperationalError` into a **503** that says so.
 - Each endpoint gets a per-request session via `Depends(get_session)`. Logic lives in the modules; the endpoints just wire them to HTTP.
 - **Probe — "why 202 on upload?"** → "Ingestion is queued to a worker, so the upload returns immediately with `pending`; the client polls for `ready`."
 

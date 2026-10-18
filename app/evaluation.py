@@ -93,6 +93,15 @@ def false_refusals(results: list[CaseResult]) -> list[str]:
     return [r.case.question for r in results if r.case.is_answerable() and r.refused]
 
 
+def wrongly_answered(results: list[CaseResult]) -> list[str]:
+    """Unanswerable questions that got an answer anyway -- the dangerous miss.
+
+    The document does not contain these answers, so whatever the model said
+    came from somewhere other than the document.
+    """
+    return [r.case.question for r in results if r.case.expect_refusal and not r.refused]
+
+
 def missed(results: list[CaseResult]) -> list[str]:
     """Answerable questions where retrieval never surfaced the answer."""
     return [r.case.question
@@ -108,6 +117,7 @@ class Report:
     unanswerable: int
     false_refusals: list[str]
     missed: list[str]
+    wrongly_answered: list[str]
 
     def summary(self) -> str:
         lines = [
@@ -120,8 +130,11 @@ class Report:
         if self.false_refusals:
             lines.append("\n  wrongly refused (threshold may be too high):")
             lines += [f"    - {q}" for q in self.false_refusals]
-        if not self.missed and not self.false_refusals:
-            lines.append("\n  no misses and no false refusals.")
+        if self.wrongly_answered:
+            lines.append("\n  answered, but the document does not contain the answer:")
+            lines += [f"    - {q}" for q in self.wrongly_answered]
+        if not self.missed and not self.false_refusals and not self.wrongly_answered:
+            lines.append("\n  no misses, no false refusals, no wrong answers.")
         return "\n".join(lines)
 
 
@@ -133,4 +146,5 @@ def score(results: list[CaseResult]) -> Report:
         unanswerable=sum(r.case.expect_refusal for r in results),
         false_refusals=false_refusals(results),
         missed=missed(results),
+        wrongly_answered=wrongly_answered(results),
     )

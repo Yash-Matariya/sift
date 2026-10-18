@@ -35,16 +35,37 @@ def _chunk(text: str) -> list[str]:
 
     Overlap means neighbouring chunks share some text, so an answer that
     straddles a boundary is still fully present in at least one chunk.
+
+    Both edges of a window are moved to a space, so no chunk starts or ends in
+    the middle of a word. The first version cut at exact character counts, and
+    a passage shown as a source began "eclined the card" (from "declined").
+    Only a single word longer than the whole window, which has no space to move
+    to, is still cut.
     """
     size, overlap = settings.chunk_size, settings.chunk_overlap
-    text = text.strip()
-    chunks, i = [], 0
-    while i < len(text):
-        piece = text[i:i + size].strip()
-        if piece:
-            chunks.append(piece)
-        i += size - overlap
+    text = " ".join(text.split())         # runs of spaces and newlines -> one space
+    chunks, start = [], 0
+    while start < len(text):
+        end = min(start + size, len(text))
+        # Don't end inside a word: back up to the last space in the window.
+        if end < len(text) and text[end] != " ":
+            space = text.rfind(" ", start, end)
+            if space > start:
+                end = space
+        chunks.append(text[start:end])
+        if end == len(text):
+            break
+        # Step back by the overlap, then forward to the start of the next word.
+        start = max(end - overlap, start + 1)
+        if text[start - 1] != " ":
+            space = text.find(" ", start, end)
+            if space != -1:
+                start = space + 1
     return chunks
+
+
+class DocumentGone(ValueError):
+    """The document was deleted before it could be ingested. Not worth retrying."""
 
 
 def ingest_into(session: Session, document_id: int) -> None:
@@ -56,7 +77,7 @@ def ingest_into(session: Session, document_id: int) -> None:
     """
     doc = session.get(Document, document_id)
     if doc is None:
-        raise ValueError(f"document {document_id} not found")
+        raise DocumentGone(f"document {document_id} not found")
 
     doc.status = "processing"
     session.commit()
@@ -70,7 +91,7 @@ def ingest_into(session: Session, document_id: int) -> None:
         session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
 
         for index, piece in enumerate(_chunk(text)):
-            vector = embed(piece)             # one embedding per chunk (via Ollama)
+            vector = embed(settings.embed_document_prefix + piece)   # one embedding per chunk (via Ollama)
             session.add(Chunk(document_id=doc.id, chunk_index=index,
                               text=piece, embedding=vector))
 

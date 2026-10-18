@@ -102,8 +102,17 @@ def test_report_counts_and_lists_the_failures():
     assert report.recall_at_k == 0.5
     assert report.refusal_accuracy == 0.5
     assert report.missed == ["missed it"]
+    assert report.wrongly_answered == ["should have declined"]
+
+
+def test_summary_names_an_unanswerable_question_that_got_answered():
+    # This line was missing: a run with refusal accuracy at 80% still ended
+    # "no misses and no false refusals", and the one bad answer was easy to miss.
+    report = score([answerable("a", found=True), unanswerable("Who is the CEO?", refused=False)])
+    assert "Who is the CEO?" in report.summary()
+    assert "no wrong answers" not in report.summary()
 
 
 def test_summary_says_so_when_nothing_failed():
     report = score([answerable("a", found=True), unanswerable("b", refused=True)])
-    assert "no misses and no false refusals" in report.summary()
+    assert "no misses, no false refusals, no wrong answers" in report.summary()

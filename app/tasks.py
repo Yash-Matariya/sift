@@ -11,7 +11,7 @@ briefly unavailable — recovers on its own without creating duplicate chunks.
 """
 from app.celery_app import celery
 from app.db import SessionLocal
-from app.ingest import ingest_into
+from app.ingest import DocumentGone, ingest_into
 
 
 @celery.task(bind=True, max_retries=3, default_retry_delay=5)
@@ -20,6 +20,8 @@ def ingest_document_task(self, document_id: int):
     session = SessionLocal()
     try:
         ingest_into(session, document_id)
+    except DocumentGone:
+        return              # deleted before the worker got to it: nothing to do, nothing to retry
     except Exception as exc:
         # Retry transient failures (e.g. embedding service down) with backoff.
         # ingest_into already marked the document "failed"; a retry will re-run

@@ -41,6 +41,14 @@
   input[type=text]:focus, input[type=file]:focus {
     outline:none; border-color:var(--accent);
   }
+  /* The browser's own "Choose File" button is a light-grey box on a dark page. */
+  input[type=file] { padding:7px 8px; color:var(--ink-dim); cursor:pointer; }
+  input[type=file]::file-selector-button {
+    background:var(--panel-2); color:var(--ink); border:1px solid var(--line);
+    border-radius:6px; padding:6px 12px; margin-right:12px;
+    font:inherit; font-size:13px; cursor:pointer;
+  }
+  input[type=file]::file-selector-button:hover { border-color:var(--accent); }
   button {
     background:var(--accent); color:#0a0b0e; border:0; border-radius:8px;
     padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer;
@@ -50,12 +58,21 @@
   button:active:not(:disabled) { transform:translateY(1px); }
   button:disabled { opacity:.5; cursor:not-allowed; }
   button.ghost { background:transparent; color:var(--ink-dim); border:1px solid var(--line); }
+  button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button.more { background:none; color:var(--accent); padding:6px 0 0;
+                font-size:12px; font-weight:600; }
 
   .docs { display:flex; flex-direction:column; gap:7px; margin-top:14px; }
   .doc { display:flex; align-items:center; gap:10px; font-size:13px;
          background:var(--panel-2); border:1px solid var(--line);
          border-radius:8px; padding:8px 12px; }
-  .doc .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .doc .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .doc .stuck { display:block; color:var(--warn); font-size:12px; white-space:normal; }
+  .doc .stuck.bad { color:var(--bad); }
+  .doc .acts { display:flex; gap:6px; }
+  .doc .acts button { font-size:12px; padding:3px 9px; border-radius:6px; }
+  .doc .acts .del { background:transparent; color:var(--ink-faint); border:1px solid var(--line); }
+  .doc .acts .del:hover { color:var(--bad); border-color:var(--bad); }
   .pill { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:600;
           letter-spacing:.02em; }
   .pending    { background:#3a2f12; color:var(--warn); }
@@ -79,6 +96,8 @@
           border-radius:8px; padding:11px 13px; margin-bottom:8px; font-size:13px; }
   .cite .src { color:var(--accent); font-size:12px; font-weight:600; margin-bottom:5px; }
   .cite .txt { color:var(--ink-dim); line-height:1.55; }
+  .cite .txt.clamp { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical;
+                     overflow:hidden; }
 
   .err { color:var(--bad); font-size:13px; margin-top:10px; }
   .muted { color:var(--ink-faint); font-size:13px; }
@@ -113,7 +132,7 @@
       <button id="upBtn">Upload</button>
     </form>
     <div class="docs" id="docs"></div>
-    <div class="err" id="upErr"></div>
+    <div class="err" id="upErr" role="alert"></div>
   </section>
 
   <section class="panel">
@@ -123,16 +142,16 @@
       <input type="text" id="q" placeholder="What does the document say about…" required />
       <button id="askBtn">Ask</button>
     </form>
-    <div class="err" id="askErr"></div>
+    <div class="err" id="askErr" role="alert"></div>
   </section>
 
-  <section class="panel" id="out" hidden>
+  <section class="panel" id="out" hidden aria-live="polite">
     <h2 id="outTitle">Answer</h2>
     <div id="answer" class="answer"></div>
     <div class="trace" id="trace"></div>
     <div class="cites" id="cites" hidden>
       <h2>Sources</h2>
-      <p class="hint">Built from the passages actually sent to the model — so they cannot be invented.</p>
+      <p class="hint">The passages that were sent to the model with the question, best match first. They come from the retrieval step, not from the model, so they cannot be invented.</p>
       <div id="citeList"></div>
     </div>
   </section>
@@ -146,18 +165,80 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const docs = new Map();          // id -> {filename, status}
+const pendingSince = new Map();  // id -> when this page first saw it pending
+const STUCK_MS = 15000;          // pending this long: no worker is taking jobs
 let pollTimer = null;
+let pollDelay = 1500;
 
 // ---- documents ------------------------------------------------------------
 
 function renderDocs() {
-  $("docs").innerHTML = [...docs.entries()].map(([id, d]) => `
+  if (!docs.size) {
+    $("docs").innerHTML = `<p class="muted">No documents yet. Until you add one, every
+      question is declined, because there is nothing to answer from.</p>`;
+    $("docCount").textContent = "";
+    return;
+  }
+  const now = Date.now();
+  $("docs").innerHTML = [...docs.entries()].map(([id, d]) => {
+    const stuck = d.status === "pending" && now - pendingSince.get(id) > STUCK_MS;
+    const failed = d.status === "failed";
+    const note = stuck
+      ? `<span class="stuck">Nothing has picked this up. Check the worker and Redis are running, then press Retry.</span>`
+      : failed
+        ? `<span class="stuck bad">This one didn't finish. Press Retry, or delete it.</span>`
+        : "";
+    return `
     <div class="doc">
-      <span class="name">${esc(d.filename)}</span>
+      <span class="name">${esc(d.filename)}${note}</span>
       <span class="pill ${d.status}">${d.status}</span>
-    </div>`).join("");
+      <span class="acts">
+        ${stuck || failed ? `<button data-act="retry" data-id="${id}">Retry</button>` : ""}
+        <button class="del" data-act="delete" data-id="${id}" title="Delete this document">Delete</button>
+      </span>
+    </div>`;
+  }).join("");
   const ready = [...docs.values()].filter(d => d.status === "ready").length;
-  $("docCount").textContent = docs.size ? `${ready} of ${docs.size} ready` : "";
+  $("docCount").textContent = `${ready} of ${docs.size} ready`;
+}
+
+function track(d) {
+  const before = docs.get(d.id);
+  docs.set(d.id, { filename: d.filename, status: d.status });
+  if (d.status !== "pending") pendingSince.delete(d.id);
+  else if (!pendingSince.has(d.id)) pendingSince.set(d.id, Date.now());
+  return !before || before.status !== d.status;
+}
+
+// Every document, not just the ones uploaded since the page opened: after a
+// reload the list, the ready count and the sources' filenames still match.
+async function loadDocs() {
+  try {
+    const res = await fetch("/documents");
+    if (!res.ok) return false;
+    let changed = false;
+    for (const d of await res.json()) changed = track(d) || changed;
+    renderDocs();
+    return changed;
+  } catch {
+    return false;                // transient: the next poll tries again
+  }
+}
+
+// Poll only while something is still being processed, and stop once it has
+// all settled. While nothing changes the wait doubles, up to 30 s, so a
+// document that never settles (no worker running) cannot keep the tab busy.
+function schedulePoll(reset) {
+  if (reset) pollDelay = 1500;
+  clearTimeout(pollTimer);
+  const unsettled = [...docs.values()].some(d =>
+    d.status === "pending" || d.status === "processing");
+  if (!unsettled) { pollTimer = null; return; }
+  pollTimer = setTimeout(async () => {
+    const changed = await loadDocs();
+    pollDelay = changed ? 1500 : Math.min(pollDelay * 2, 30000);
+    schedulePoll(false);
+  }, pollDelay);
 }
 
 $("up").addEventListener("submit", async (e) => {
@@ -170,10 +251,9 @@ $("up").addEventListener("submit", async (e) => {
     body.append("file", f);
     const res = await fetch("/documents", { method: "POST", body });
     if (!res.ok) throw new Error(await message(res));
-    const doc = await res.json();
-    docs.set(doc.id, { filename: doc.filename, status: doc.status });
+    track(await res.json());
     renderDocs();
-    startPolling();
+    schedulePoll(true);
     $("up").reset();
   } catch (err) {
     $("upErr").textContent = err.message;
@@ -182,25 +262,34 @@ $("up").addEventListener("submit", async (e) => {
   }
 });
 
-// Poll only while something is still being processed, and stop as soon as
-// everything is settled — a timer that never stops is a battery leak.
-function startPolling() {
-  if (pollTimer) return;
-  pollTimer = setInterval(async () => {
-    const unsettled = [...docs.entries()].filter(([, d]) =>
-      d.status === "pending" || d.status === "processing");
-    if (!unsettled.length) { clearInterval(pollTimer); pollTimer = null; return; }
-    for (const [id] of unsettled) {
-      try {
-        const res = await fetch(`/documents/${id}`);
-        if (!res.ok) continue;
-        const d = await res.json();
-        docs.set(id, { filename: d.filename, status: d.status });
-      } catch { /* transient: try again on the next tick */ }
+// Retry and Delete on each row. One listener for the whole list, because the
+// rows are re-rendered on every poll.
+$("docs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const id = Number(b.dataset.id), name = docs.get(id)?.filename ?? "this document";
+  $("upErr").textContent = "";
+  if (b.dataset.act === "delete" && !confirm(`Delete ${name}? Its passages go too.`)) return;
+  b.disabled = true;
+  try {
+    if (b.dataset.act === "retry") {
+      const res = await fetch(`/documents/${id}/retry`, { method: "POST" });
+      if (!res.ok) throw new Error(await message(res));
+      pendingSince.delete(id);
+      track(await res.json());
+      schedulePoll(true);
+    } else {
+      const res = await fetch(`/documents/${id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) throw new Error(await message(res));
+      docs.delete(id); pendingSince.delete(id);
     }
+  } catch (err) {
+    $("upErr").textContent = err.message;
+    await loadDocs();            // a failed retry may have changed the status
+  } finally {
     renderDocs();
-  }, 1500);
-}
+  }
+});
 
 // ---- asking ---------------------------------------------------------------
 
@@ -244,24 +333,47 @@ function render(r) {
     const t = r.trace;
     const steps = [
       `<span class="step">retrieved <b>${t.attempts}×</b></span>`,
-      t.rewritten
-        ? `<span class="step hl">rewrote the query → <b>${esc(t.final_query)}</b></span>`
-        : `<span class="step">first query was good enough</span>`,
+      t.attempts === 1
+        ? `<span class="step">first query was good enough</span>`
+        : t.rewritten
+          ? `<span class="step hl">rewrote the query → <b>${esc(t.final_query)}</b></span>`
+          : `<span class="step">retried with the original query</span>`,
+      t.searches > 1
+        ? `<span class="step hl">split into <b>${t.searches}</b> searches</span>` : "",
+      t.widened ? `<span class="step hl">looked wider before answering</span>` : "",
       `<span class="step">best match <b>${t.best_score.toFixed(2)}</b></span>`,
       `<span class="step">${t.chunks_found === 0
           ? "nothing passed the relevance gate"
-          : `<b>${t.chunks_found}</b> passage${t.chunks_found === 1 ? "" : "s"} used`}</span>`,
+          : `<b>${t.chunks_found}</b> passage${t.chunks_found === 1 ? "" : "s"} sent to the model`}</span>`,
     ];
     $("trace").innerHTML = steps.join("");
   }
 
   if (r.citations && r.citations.length) {
-    $("citeList").innerHTML = r.citations.map(c => `
+    // The same passage from several documents (a file uploaded twice) is one card that
+    // names every source, matching how retrieval counted it once.
+    const groups = new Map();
+    for (const c of r.citations) {
+      const key = c.text.replace(/\s+/g, " ").trim().toLowerCase();
+      if (!groups.has(key)) groups.set(key, { text: c.text, srcs: [] });
+      groups.get(key).srcs.push(`${c.document} · chunk ${c.chunk_index}`);
+    }
+    $("citeList").innerHTML = [...groups.values()].map(g => `
       <div class="cite">
-        <div class="src">${esc(c.document)} · chunk ${c.chunk_index}</div>
-        <div class="txt">${esc(c.text)}</div>
+        <div class="src">${g.srcs.map(esc).join(" &nbsp;+&nbsp; ")}</div>
+        <div class="txt clamp">${esc(g.text)}</div>
       </div>`).join("");
     $("cites").hidden = false;
+    // Only passages that are actually cut off get a button.
+    document.querySelectorAll("#citeList .txt").forEach(el => {
+      if (el.scrollHeight <= el.clientHeight + 1) return;
+      const b = document.createElement("button");
+      b.className = "more"; b.type = "button"; b.textContent = "Show the whole passage";
+      b.addEventListener("click", () => {
+        b.textContent = el.classList.toggle("clamp") ? "Show the whole passage" : "Show less";
+      });
+      el.after(b);
+    });
   }
 }
 
@@ -273,6 +385,8 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, ch => (
     { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
 }
+
+loadDocs().then(() => schedulePoll(true));
 
 async function message(res) {
   try {
